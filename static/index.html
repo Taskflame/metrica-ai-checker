@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>МЕТРИКА — ИИ-проверка домашки</title>
+<style>
+  :root {
+    --bg: #f6f8fb; --card: #fff; --text: #1a2233; --muted: #64748b;
+    --accent: #2b6cb0; --ok: #2f855a; --err: #c53030; --warn: #b45309;
+    --border: #e2e8f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text);
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; margin-bottom: 16px;
+  }
+  #drop {
+    border: 2px dashed var(--border); border-radius: 12px; padding: 40px;
+    text-align: center; cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  #drop.drag { border-color: var(--accent); background: #eef4fb; }
+  #drop p { margin: 8px 0 0; color: var(--muted); font-size: .9rem; }
+  #preview { max-width: 100%; max-height: 320px; border-radius: 8px; margin-top: 12px; display: none; }
+  button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+    padding: 12px 24px; font-size: 1rem; cursor: pointer; margin-top: 16px;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  .spinner { display: none; margin-top: 16px; color: var(--muted); }
+  .badge {
+    display: inline-block; padding: 2px 10px; border-radius: 999px;
+    font-size: .78rem; font-weight: 600;
+  }
+  .badge.ok { background: #e9fbea; color: var(--ok); }
+  .badge.err { background: #fff5f5; color: var(--err); }
+  .badge.sev { background: #fff7ed; color: var(--warn); margin-left: 6px; }
+  .error-item {
+    border-left: 3px solid var(--err); background: #fffafa;
+    padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 10px 0;
+  }
+  .error-item .cmp { font-size: .92rem; }
+  .error-item .cmp b.no { color: var(--err); }
+  .error-item .cmp b.yes { color: var(--ok); }
+  .practice {
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; margin: 10px 0;
+  }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; color: var(--accent); font-size: .9rem; }
+  .topic-chip {
+    display: inline-block; background: #eef4fb; color: var(--accent);
+    border-radius: 999px; padding: 4px 12px; font-size: .85rem; margin: 2px 4px 2px 0;
+  }
+  .transcription {
+    background: #f8fafc; border-radius: 8px; padding: 10px 14px;
+    font-family: ui-monospace, monospace; font-size: .88rem; white-space: pre-wrap;
+    color: var(--muted);
+  }
+  .fail { color: var(--err); }
+  h2 { font-size: 1.1rem; }
+  h3 { font-size: 1rem; margin: 0 0 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ИИ-проверка домашки по математике</h1>
+  <p class="sub">Прототип для платформы «МЕТРИКА». Загрузи фото — агент найдёт ошибки и составит задания для работы над ними.</p>
+
+  <div class="card">
+    <div id="drop">
+      <strong>Нажми или перетащи фото сюда</strong>
+      <p>JPEG, PNG или WebP, до 5 МБ</p>
+      <img id="preview" alt="предпросмотр">
+    </div>
+    <input type="file" id="file" accept="image/jpeg,image/png,image/webp" hidden>
+    <div style="margin-top:16px">
+      <label><input type="radio" name="mode" value="school" checked> Школьная программа</label>
+      <label style="margin-left:16px"><input type="radio" name="mode" value="ege_profile"> ЕГЭ профиль (критерии ФИПИ)</label>
+    </div>
+    <button id="go" disabled>Проверить работу</button>
+    <div class="spinner" id="spin">Агент разбирает работу… обычно это 20–60 секунд.</div>
+  </div>
+
+  <div id="result"></div>
+</div>
+
+<script>
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file');
+const go = document.getElementById('go');
+const spin = document.getElementById('spin');
+const preview = document.getElementById('preview');
+const resultBox = document.getElementById('result');
+let file = null;
+
+drop.onclick = () => fileInput.click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('drag'); };
+drop.ondragleave = () => drop.classList.remove('drag');
+drop.ondrop = e => {
+  e.preventDefault(); drop.classList.remove('drag');
+  if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+};
+fileInput.onchange = () => fileInput.files[0] && setFile(fileInput.files[0]);
+
+function setFile(f) {
+  file = f;
+  go.disabled = false;
+  preview.src = URL.createObjectURL(f);
+  preview.style.display = 'block';
+}
+
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const sevName = { conceptual: 'непонимание темы', computational: 'ошибка в вычислениях', careless: 'невнимательность' };
+
+go.onclick = async () => {
+  if (!file) return;
+  go.disabled = true; spin.style.display = 'block'; resultBox.innerHTML = '';
+  const fd = new FormData();
+  fd.append('photo', file);
+  fd.append('mode', document.querySelector('input[name="mode"]:checked').value);
+  spin.textContent = fd.get('mode') === 'ege_profile'
+    ? 'Агент прорешивает задания и сверяет с критериями ФИПИ… это может занять 1–3 минуты.'
+    : 'Агент разбирает работу… обычно это 20–60 секунд.';
+  try {
+    const r = await fetch('/api/check', { method: 'POST', body: fd });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Ошибка сервера');
+    render(data);
+  } catch (e) {
+    resultBox.innerHTML = `<div class="card fail">Не получилось: ${esc(e.message)}</div>`;
+  } finally {
+    go.disabled = false; spin.style.display = 'none';
+  }
+};
+
+function render(d) {
+  let html = '';
+
+  if (!d.readable) {
+    html += `<div class="card"><h2>Фото не удалось разобрать</h2><p>${esc(d.quality_note || 'Попробуй переснять при хорошем освещении.')}</p></div>`;
+    resultBox.innerHTML = html;
+    return;
+  }
+
+  html += `<div class="card"><h2>Итог</h2><p>${esc(d.summary)}</p>`;
+  if (d.error_topics.length) {
+    html += `<div>Темы для повторения: ${d.error_topics.map(t => `<span class="topic-chip">${esc(t)}</span>`).join('')}</div>`;
+  }
+  html += `</div>`;
+
+  for (const t of d.tasks) {
+    let scoreBadge = '';
+    if (t.max_score != null && t.estimated_score != null) {
+      const full = t.estimated_score >= t.max_score;
+      scoreBadge = `<span class="badge ${full ? 'ok' : 'sev'}">${t.estimated_score} / ${t.max_score} балла</span>`;
+    }
+    const egeNum = t.ege_task_number ? ` <span class="topic-chip">задание №${t.ege_task_number} ЕГЭ</span>` : '';
+    html += `<div class="card">
+      <h3>${esc(t.task_label)} <span class="badge ${t.is_correct ? 'ok' : 'err'}">${t.is_correct ? 'верно' : 'есть ошибки'}</span>${scoreBadge}${egeNum}</h3>
+      ${t.score_rationale ? `<p style="color:var(--muted);font-size:.9rem">${esc(t.score_rationale)}</p>` : ''}
+      <details><summary>Что распознал агент</summary><div class="transcription">${esc(t.transcription)}</div></details>`;
+    if (t.justification_gaps && t.justification_gaps.length) {
+      html += `<div class="error-item" style="border-left-color:var(--warn);background:#fffdf7">
+        <strong>Пробелы в обосновании (за это снимут баллы):</strong>
+        <ul style="margin:6px 0 0;padding-left:20px">${t.justification_gaps.map(g => `<li>${esc(g)}</li>`).join('')}</ul>
+      </div>`;
+    }
+    for (const err of t.errors) {
+      html += `<div class="error-item">
+        <div><strong>${esc(err.location)}</strong><span class="badge sev">${esc(sevName[err.severity] || err.severity)}</span></div>
+        <div class="cmp">Написано: <b class="no">${esc(err.student_wrote)}</b> → Правильно: <b class="yes">${esc(err.correct)}</b></div>
+        <div>${esc(err.explanation)}</div>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  if (d.practice.length) {
+    html += `<div class="card"><h2>Работа над ошибками</h2>`;
+    d.practice.forEach((p, i) => {
+      html += `<div class="practice">
+        <div><span class="topic-chip">${esc(p.topic)}</span></div>
+        <p><strong>Задание ${i + 1}.</strong> ${esc(p.question)}</p>
+        <details><summary>Подсказка</summary><p>${esc(p.hint)}</p></details>
+        <details><summary>Ответ и решение</summary><p><strong>Ответ:</strong> ${esc(p.answer)}</p><p>${esc(p.solution)}</p></details>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  resultBox.innerHTML = html;
+}
+</script>
+</body>
+</html>
