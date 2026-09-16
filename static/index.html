@@ -22,12 +22,13 @@
     background: var(--card); border: 1px solid var(--border);
     border-radius: 12px; padding: 20px; margin-bottom: 16px;
   }
-  #drop {
+  #drop, .dropzone {
     border: 2px dashed var(--border); border-radius: 12px; padding: 40px;
     text-align: center; cursor: pointer; transition: border-color .15s, background .15s;
   }
-  #drop.drag { border-color: var(--accent); background: #eef4fb; }
-  #drop p { margin: 8px 0 0; color: var(--muted); font-size: .9rem; }
+  #drop.drag, .dropzone.drag { border-color: var(--accent); background: #eef4fb; }
+  #drop p, .dropzone p { margin: 8px 0 0; color: var(--muted); font-size: .9rem; }
+  .task-toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--muted); font-size: .9rem; margin-top: 16px; }
   #preview { max-width: 100%; max-height: 320px; border-radius: 8px; margin-top: 12px; display: none; }
   button {
     background: var(--accent); color: #fff; border: 0; border-radius: 8px;
@@ -77,10 +78,28 @@
   <div class="card">
     <div id="drop">
       <strong>Нажми или перетащи фото сюда</strong>
-      <p>JPEG, PNG или WebP, до 5 МБ</p>
-      <img id="preview" alt="предпросмотр">
+      <p>JPEG, PNG или WebP, до 5 МБ каждое. Можно выбрать сразу несколько страниц одной работы.</p>
+      <div id="previewList" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px"></div>
     </div>
-    <input type="file" id="file" accept="image/jpeg,image/png,image/webp" hidden>
+    <input type="file" id="file" accept="image/jpeg,image/png,image/webp" multiple hidden>
+
+    <label class="task-toggle">
+      <input type="checkbox" id="taskToggle">
+      Прикрепить отдельное фото условия (если на фото решения самого условия не видно)
+    </label>
+    <div id="taskDropWrap" style="display:none;margin-top:8px">
+      <div id="taskDrop" class="dropzone" style="padding:20px">
+        <span style="font-size:.9rem;color:var(--muted)">Нажми или перетащи фото условия сюда</span>
+        <img id="taskPreview" alt="предпросмотр условия" style="max-width:100%;max-height:200px;border-radius:8px;margin-top:10px;display:none">
+      </div>
+      <input type="file" id="taskFile" accept="image/jpeg,image/png,image/webp" hidden>
+    </div>
+
+    <div style="margin-top:16px">
+      <label for="studentId" style="display:block;font-size:.9rem;color:var(--muted);margin-bottom:4px">Имя/ID ученика</label>
+      <input type="text" id="studentId" placeholder="например, ivanov_petya" style="width:100%;max-width:320px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:.95rem">
+    </div>
+
     <div style="margin-top:16px">
       <label><input type="radio" name="mode" value="school" checked> Школьная программа</label>
       <label style="margin-left:16px"><input type="radio" name="mode" value="ege_profile"> ЕГЭ профиль (критерии ФИПИ)</label>
@@ -90,6 +109,12 @@
   </div>
 
   <div id="result"></div>
+
+  <div class="card">
+    <h2 style="margin-top:0">Прогресс ученика</h2>
+    <button id="showHistory" style="margin-top:0">Показать историю и прогресс</button>
+    <div id="progressBox"></div>
+  </div>
 </div>
 
 <script>
@@ -97,34 +122,99 @@ const drop = document.getElementById('drop');
 const fileInput = document.getElementById('file');
 const go = document.getElementById('go');
 const spin = document.getElementById('spin');
-const preview = document.getElementById('preview');
+const previewList = document.getElementById('previewList');
 const resultBox = document.getElementById('result');
-let file = null;
+let files = [];
 
 drop.onclick = () => fileInput.click();
 drop.ondragover = e => { e.preventDefault(); drop.classList.add('drag'); };
 drop.ondragleave = () => drop.classList.remove('drag');
 drop.ondrop = e => {
   e.preventDefault(); drop.classList.remove('drag');
-  if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+  if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
 };
-fileInput.onchange = () => fileInput.files[0] && setFile(fileInput.files[0]);
+fileInput.onchange = () => fileInput.files.length && addFiles(fileInput.files);
 
-function setFile(f) {
-  file = f;
-  go.disabled = false;
-  preview.src = URL.createObjectURL(f);
-  preview.style.display = 'block';
+const studentIdInput = document.getElementById('studentId');
+studentIdInput.value = localStorage.getItem('metrica_student_id') || '';
+studentIdInput.oninput = () => {
+  localStorage.setItem('metrica_student_id', studentIdInput.value.trim());
+  updateGoState();
+};
+
+function updateGoState() {
+  go.disabled = !files.length || !studentIdInput.value.trim();
+}
+
+function addFiles(fileList) {
+  files.push(...fileList);
+  updateGoState();
+  renderPreviews();
+}
+
+function removeFile(index) {
+  files.splice(index, 1);
+  updateGoState();
+  renderPreviews();
+}
+
+function renderPreviews() {
+  previewList.innerHTML = files.map((f, i) => `
+    <div style="position:relative">
+      <img src="${URL.createObjectURL(f)}" alt="стр. ${i + 1}"
+           style="width:96px;height:96px;object-fit:cover;border-radius:8px;border:1px solid var(--border)">
+      <span style="position:absolute;top:2px;left:2px;background:#0008;color:#fff;font-size:.72rem;padding:1px 6px;border-radius:999px">${i + 1}</span>
+      <button data-i="${i}" class="removePreview"
+              style="position:absolute;top:2px;right:2px;padding:0;width:20px;height:20px;line-height:18px;margin:0;border-radius:50%;font-size:.85rem">×</button>
+    </div>
+  `).join('');
+  previewList.querySelectorAll('.removePreview').forEach(btn => {
+    btn.onclick = e => { e.stopPropagation(); removeFile(+btn.dataset.i); };
+  });
+}
+
+const taskToggle = document.getElementById('taskToggle');
+const taskDropWrap = document.getElementById('taskDropWrap');
+const taskDrop = document.getElementById('taskDrop');
+const taskFileInput = document.getElementById('taskFile');
+const taskPreview = document.getElementById('taskPreview');
+let taskFile = null;
+
+taskToggle.onchange = () => {
+  taskDropWrap.style.display = taskToggle.checked ? 'block' : 'none';
+  if (!taskToggle.checked) {
+    taskFile = null;
+    taskPreview.style.display = 'none';
+    taskFileInput.value = '';
+  }
+};
+taskDrop.onclick = () => taskFileInput.click();
+taskDrop.ondragover = e => { e.preventDefault(); taskDrop.classList.add('drag'); };
+taskDrop.ondragleave = () => taskDrop.classList.remove('drag');
+taskDrop.ondrop = e => {
+  e.preventDefault(); taskDrop.classList.remove('drag');
+  if (e.dataTransfer.files[0]) setTaskFile(e.dataTransfer.files[0]);
+};
+taskFileInput.onchange = () => taskFileInput.files[0] && setTaskFile(taskFileInput.files[0]);
+
+function setTaskFile(f) {
+  taskFile = f;
+  taskPreview.src = URL.createObjectURL(f);
+  taskPreview.style.display = 'block';
 }
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const sevName = { conceptual: 'непонимание темы', computational: 'ошибка в вычислениях', careless: 'невнимательность' };
 
 go.onclick = async () => {
-  if (!file) return;
+  if (!files.length || !studentIdInput.value.trim()) return;
   go.disabled = true; spin.style.display = 'block'; resultBox.innerHTML = '';
   const fd = new FormData();
-  fd.append('photo', file);
+  files.forEach(f => fd.append('photos', f));
+  fd.append('student_id', studentIdInput.value.trim());
+  if (taskToggle.checked && taskFile) {
+    fd.append('task_photo', taskFile);
+  }
   fd.append('mode', document.querySelector('input[name="mode"]:checked').value);
   spin.textContent = fd.get('mode') === 'ege_profile'
     ? 'Агент прорешивает задания и сверяет с критериями ФИПИ… это может занять 1–3 минуты.'
@@ -137,7 +227,7 @@ go.onclick = async () => {
   } catch (e) {
     resultBox.innerHTML = `<div class="card fail">Не получилось: ${esc(e.message)}</div>`;
   } finally {
-    go.disabled = false; spin.style.display = 'none';
+    updateGoState(); spin.style.display = 'none';
   }
 };
 
@@ -150,7 +240,11 @@ function render(d) {
     return;
   }
 
-  html += `<div class="card"><h2>Итог</h2><p>${esc(d.summary)}</p>`;
+  html += `<div class="card"><h2>Итог</h2>`;
+  if (d.homework_label) {
+    html += `<div><span class="topic-chip">${esc(d.homework_label)}</span></div>`;
+  }
+  html += `<p>${esc(d.summary)}</p>`;
   if (d.error_topics.length) {
     html += `<div>Темы для повторения: ${d.error_topics.map(t => `<span class="topic-chip">${esc(t)}</span>`).join('')}</div>`;
   }
@@ -197,6 +291,85 @@ function render(d) {
   }
 
   resultBox.innerHTML = html;
+}
+
+const showHistoryBtn = document.getElementById('showHistory');
+const progressBox = document.getElementById('progressBox');
+
+showHistoryBtn.onclick = async () => {
+  const id = studentIdInput.value.trim();
+  if (!id) {
+    progressBox.innerHTML = `<p class="fail" style="margin-top:12px">Сначала укажи ID ученика в поле выше.</p>`;
+    return;
+  }
+  showHistoryBtn.disabled = true;
+  progressBox.innerHTML = `<p style="color:var(--muted);margin-top:12px">Загружаю…</p>`;
+  try {
+    const r = await fetch(`/api/students/${encodeURIComponent(id)}/homeworks`);
+    const homeworks = await r.json();
+    if (!r.ok) throw new Error(homeworks.detail || 'Ошибка сервера');
+    renderHistory(id, homeworks);
+  } catch (e) {
+    progressBox.innerHTML = `<p class="fail" style="margin-top:12px">Не получилось: ${esc(e.message)}</p>`;
+  } finally {
+    showHistoryBtn.disabled = false;
+  }
+};
+
+function renderHistory(id, homeworks) {
+  const threshold = 10;
+  const count = homeworks.length;
+  let html = `<p style="margin:12px 0 4px">Занятий: ${count}/${threshold}</p>`;
+  if (count === 0) {
+    html += `<p style="color:var(--muted)">Пока нет проверенных домашек у этого ученика.</p>`;
+    progressBox.innerHTML = html;
+    return;
+  }
+  html += `<div>${homeworks.map(h => `<span class="topic-chip">${esc(h.homework_label)}</span>`).join('')}</div>`;
+  html += `<button id="showProgress" style="margin-top:12px">Собрать аналитику за период</button>`;
+  html += `<div id="progressResult"></div>`;
+  progressBox.innerHTML = html;
+
+  document.getElementById('showProgress').onclick = async () => {
+    const btn = document.getElementById('showProgress');
+    const box = document.getElementById('progressResult');
+    btn.disabled = true;
+    box.innerHTML = `<p style="color:var(--muted);margin-top:12px">Агент анализирует накопленные ошибки…</p>`;
+    try {
+      const r = await fetch(`/api/students/${encodeURIComponent(id)}/progress`);
+      const report = await r.json();
+      if (!r.ok) throw new Error(report.detail || 'Ошибка сервера');
+      renderProgress(box, report);
+    } catch (e) {
+      box.innerHTML = `<p class="fail" style="margin-top:12px">Не получилось: ${esc(e.message)}</p>`;
+    } finally {
+      btn.disabled = false;
+    }
+  };
+}
+
+function renderProgress(box, report) {
+  let html = `<div class="card" style="margin-top:12px">`;
+  if (!report.threshold_reached) {
+    html += `<p style="color:var(--warn);font-size:.88rem;margin-top:0">Ещё не набралось 10 занятий — это предварительная сводка по ${report.homework_count}.</p>`;
+  }
+  html += `<p>${esc(report.narrative)}</p>`;
+  if (report.strengths && report.strengths.length) {
+    html += `<p><strong>Сильные стороны:</strong></p><ul style="margin:4px 0;padding-left:20px">${report.strengths.map(s => `<li>${esc(s)}</li>`).join('')}</ul>`;
+  }
+  if (report.focus_areas && report.focus_areas.length) {
+    html += `<p><strong>Над чем работать:</strong></p><ul style="margin:4px 0;padding-left:20px">${report.focus_areas.map(s => `<li>${esc(s)}</li>`).join('')}</ul>`;
+  }
+  html += `</div>`;
+
+  for (const c of (report.clusters || [])) {
+    html += `<div class="practice">
+      <div><span class="topic-chip">${esc(c.label)}</span> <span style="color:var(--muted);font-size:.85rem">${c.error_count} ошибок · ${(c.homework_labels || []).map(esc).join(', ')}</span></div>
+      <p>${esc(c.description)}</p>
+    </div>`;
+  }
+
+  box.innerHTML = html;
 }
 </script>
 </body>

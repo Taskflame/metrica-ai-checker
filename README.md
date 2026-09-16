@@ -23,10 +23,34 @@ uvicorn main:app --reload
 4. Открой http://127.0.0.1:8000 — загрузи фото, жми «Проверить работу».
 
 API напрямую: `POST /api/check`, multipart-поля:
-- `photo` — JPEG/PNG/WebP до 5 МБ;
-- `mode` — `school` (по умолчанию) или `ege_profile`.
+- `photo` — фото решения ученика, JPEG/PNG/WebP/GIF/HEIC до 5 МБ (HEIC с
+  iPhone конвертируется в JPEG на сервере);
+- `task_photo` — необязательное фото условия задания (если на фото решения
+  само условие не видно — например, ученик решал во второй тетради);
+- `mode` — `school` (по умолчанию) или `ege_profile`;
+- `student_id` — обязательное имя/ID ученика (свободный текст). Нужно, чтобы
+  копить домашки и ошибки одного ученика между проверками — при переносе в
+  metrica-backend заменяется на реальный `user_id` из системы аккаунтов.
 
-Ответ — JSON по схеме `HomeworkReview` (см. `ai_checker/schemas.py`).
+Ответ — JSON по схеме `HomeworkReview` (см. `ai_checker/schemas.py`), с
+добавленными `homework_number`/`homework_label` (например, `"дз3: задачи+уравнения"`
+— тип классифицируется моделью автоматически по каждому заданию).
+
+## Прогресс ученика за период
+
+- `GET /api/students/{student_id}/homeworks` — история проверенных домашек
+  ученика (номер, ярлык, дата, summary).
+- `GET /api/students/{student_id}/progress` — сводка по накопленным ошибкам:
+  модель группирует их по смыслу в темы (`"задачи:экономика"`,
+  `"уравнения:материал 10 класса"`) и пишет narrative о прогрессе.
+  Доступна с первой же домашки, но `threshold_reached=true` только когда
+  занятий набралось 10 (`ai_checker/taxonomy.py:PROGRESS_REPORT_THRESHOLD` —
+  в проде это будет календарный месяц). Результат кэшируется в БД до
+  следующей новой домашки — повторные вызовы бесплатны.
+
+Хранилище — SQLite (`ai_checker/storage.py`), файл `metrica_ai_checker.db`
+в корне проекта (в `.gitignore`, при переносе в metrica-backend заменяется
+на настоящие таблицы через Alembic).
 
 ## Режим «ЕГЭ профиль»
 
@@ -44,11 +68,13 @@ API напрямую: `POST /api/check`, multipart-поля:
 
 ```
 ai_checker/
-  schemas.py   # Pydantic-схемы результата (ошибки, задания)
-  prompts.py   # системный промпт агента
-  service.py   # вызов Claude API (vision), независим от FastAPI
-  router.py    # FastAPI-роутер POST /check
-main.py        # точка входа + тестовая страница
+  schemas.py    # Pydantic-схемы результата (ошибки, задания, прогресс)
+  taxonomy.py   # типы заданий + порог "занятий" для сводки прогресса
+  prompts.py    # промпты агента (проверка домашки + анализ прогресса)
+  service.py    # вызовы Claude API, независим от FastAPI
+  storage.py    # SQLite-персистентность (домашки, ошибки, кэш сводок)
+  router.py     # FastAPI-роутер: /check, /students/{id}/homeworks, /progress
+main.py         # точка входа + тестовая страница
 static/index.html
 ```
 

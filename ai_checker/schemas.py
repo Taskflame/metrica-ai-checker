@@ -25,6 +25,11 @@ class TaskReview(BaseModel):
     transcription: str = Field(description="Решение ученика, распознанное с фото")
     is_correct: bool
     errors: list[MathError] = []
+    task_types: list[str] = Field(
+        default_factory=list,
+        description="Типы задания из фиксированного набора: word_problem, "
+        "equation, inequality, geometry, function_graph, expression, other",
+    )
 
     # Поля режима ЕГЭ (в обычном режиме остаются пустыми)
     ege_task_number: int | None = Field(
@@ -71,3 +76,40 @@ class HomeworkReview(BaseModel):
     practice: list[PracticeTask] = Field(
         default_factory=list, description="Задания для работы над ошибками"
     )
+
+    # Заполняются нашим кодом после сохранения в БД, не моделью —
+    # поэтому остаются пустыми, пока review не прошёл через storage.save_submission.
+    homework_number: int | None = Field(
+        default=None, description="Порядковый номер домашки этого ученика"
+    )
+    homework_label: str | None = Field(
+        default=None, description='Ярлык вида "дз3: задачи+уравнения"'
+    )
+
+
+class ErrorCluster(BaseModel):
+    """Группа семантически похожих ошибок за период."""
+
+    label: str = Field(description='Ярлык вида "область:тема", например "задачи:экономика"')
+    description: str = Field(description="В чём суть проблемы, понятным языком")
+    homework_labels: list[str] = Field(
+        default_factory=list, description="Ярлыки домашек, где встречались эти ошибки"
+    )
+    error_count: int = Field(description="Сколько ошибок вошло в эту группу")
+
+
+class ProgressReport(BaseModel):
+    """Сводка прогресса ученика за период (несколько домашек)."""
+
+    student_id: str
+    period_label: str = Field(description='Например, "занятия 1-10"')
+    homework_count: int
+    threshold_reached: bool = Field(
+        description="Набралось ли достаточно занятий для полноценной сводки"
+    )
+    clusters: list[ErrorCluster] = Field(default_factory=list)
+    narrative: str = Field(
+        default="", description="Что ученик освоил, в чём прогресс, на что обратить внимание"
+    )
+    strengths: list[str] = Field(default_factory=list)
+    focus_areas: list[str] = Field(default_factory=list)
