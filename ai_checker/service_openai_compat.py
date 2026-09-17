@@ -58,7 +58,8 @@ def _log_usage(model: str, body: dict) -> None:
 
 
 async def _post_chat_completions(base_url: str, api_key: str, payload: dict) -> dict:
-    async with httpx.AsyncClient(timeout=600) as http:
+    proxy = os.getenv("OUTBOUND_PROXY_URL") or None
+    async with httpx.AsyncClient(timeout=600, proxy=proxy) as http:
         for attempt in range(1, MAX_RETRIES + 1):
             resp = await http.post(
                 f"{base_url.rstrip('/')}/chat/completions",
